@@ -1,0 +1,8 @@
+bin/
+*.o
+*.exe
+*.out
+.vscode/
+*.swp
+tools/
+.git2/
