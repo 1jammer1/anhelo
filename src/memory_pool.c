@@ -1,8 +1,13 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+
+#ifndef NO_FFMPEG
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
+#endif
+
 #include "../include/memory_pool.h"
 
 // Memory pool implementation
@@ -73,6 +78,7 @@ frame_pool_t *frame_pool_create(int width, int height, int pool_size) {
     
     // Pre-allocate frames and RGB buffers
     for (int i = 0; i < pool_size; i++) {
+#ifndef NO_FFMPEG
         AVFrame *frame = av_frame_alloc();
         if (!frame) {
             // Cleanup on failure
@@ -100,6 +106,25 @@ frame_pool_t *frame_pool_create(int width, int height, int pool_size) {
         
         pool->frames[i] = frame;
         pool->rgb_buffers[i] = rgb_buffer;
+#ifndef NO_FFMPEG
+        pool->rgb_sizes[i] = rgb_size;
+#endif
+#else
+        // For NO_FFMPEG, just allocate basic buffers
+        int rgb_size = width * height * 3; // RGB24
+        uint8_t *rgb_buffer = malloc(rgb_size);
+        if (!rgb_buffer) {
+            // Cleanup on failure
+            for (int j = 0; j < i; j++) {
+                free(pool->rgb_buffers[j]);
+            }
+            free(pool);
+            return NULL;
+        }
+        
+        pool->frames[i] = NULL; // No FFmpeg frames
+        pool->rgb_buffers[i] = rgb_buffer;
+#endif
     }
     
     return pool;
@@ -139,12 +164,18 @@ void frame_pool_destroy(frame_pool_t *pool) {
     if (!pool) return;
     
     for (int i = 0; i < pool->pool_size; i++) {
+#ifndef NO_FFMPEG
         if (pool->frames[i]) {
             av_frame_free((AVFrame**)&pool->frames[i]);
         }
         if (pool->rgb_buffers[i]) {
             av_free(pool->rgb_buffers[i]);
         }
+#else
+        if (pool->rgb_buffers[i]) {
+            free(pool->rgb_buffers[i]);
+        }
+#endif
     }
     
     free(pool);

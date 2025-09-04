@@ -1,4 +1,4 @@
-#include "../include/video.h"
+#include "../../include/video.h"
 #include <SDL/SDL.h>
 #include <GL/gl.h>
 #include <stdlib.h>
@@ -17,8 +17,10 @@ static int next_power_of_2(int n) {
 }
 
 struct video_t {
-    int video_width;
+    int video_width;       // Original video dimensions
     int video_height;
+    int display_width;     // Scaled display dimensions
+    int display_height;
     int window_width;
     int window_height;
 #ifdef MINIMAL_MEMORY_BUFFERS
@@ -54,6 +56,24 @@ video_t *video_create(int width, int height) {
     v->window_height = screen->h;
     v->texture_initialized = 0;
     
+    // Calculate display dimensions (scaled to fit window while maintaining aspect ratio)
+    float video_aspect = (float)width / (float)height;
+    float window_aspect = (float)v->window_width / (float)v->window_height;
+    
+    if (video_aspect > window_aspect) {
+        // Video is wider - scale to window width
+        v->display_width = v->window_width;
+        v->display_height = (int)((float)v->window_width / video_aspect);
+    } else {
+        // Video is taller - scale to window height
+        v->display_height = v->window_height;
+        v->display_width = (int)((float)v->window_height * video_aspect);
+    }
+    
+    // Center the scaled video in the window
+    v->video_x = (v->window_width - v->display_width) / 2;
+    v->video_y = (v->window_height - v->display_height) / 2;
+    
 #ifdef MINIMAL_MEMORY_BUFFERS
     // For low-memory, use non-power-of-2 textures if possible, or minimum POT
     v->texture_width = width;
@@ -64,17 +84,6 @@ video_t *video_create(int width, int height) {
     v->texture_height = next_power_of_2(height);
 #endif
     
-    // Pre-calculate video position (centered horizontally, bottom vertically)
-    v->video_x = (v->window_width - v->video_width) / 2;
-    v->video_y = v->window_height - v->video_height;
-    
-    // Ensure video doesn't go outside window bounds
-    if (v->video_x < 0) v->video_x = 0;
-    if (v->video_y < 0) v->video_y = 0;
-    if (v->video_x + v->video_width > v->window_width) {
-        v->video_x = v->window_width - v->video_width;
-    }
-    
     // Pre-calculate texture coordinates (map actual video size to power-of-2 texture)
     float tex_u = (float)v->video_width / v->texture_width;
     float tex_v = (float)v->video_height / v->texture_height;
@@ -83,11 +92,11 @@ video_t *video_create(int width, int height) {
     v->tex_coords[4] = tex_u; v->tex_coords[5] = tex_v;  // Top-right
     v->tex_coords[6] = 0.0f;  v->tex_coords[7] = tex_v;  // Top-left
     
-    // Pre-calculate vertex positions
-    v->vertices[0] = (float)v->video_x;                        v->vertices[1] = (float)v->video_y;                         // Bottom-left
-    v->vertices[2] = (float)(v->video_x + v->video_width);     v->vertices[3] = (float)v->video_y;                         // Bottom-right
-    v->vertices[4] = (float)(v->video_x + v->video_width);     v->vertices[5] = (float)(v->video_y + v->video_height);     // Top-right
-    v->vertices[6] = (float)v->video_x;                        v->vertices[7] = (float)(v->video_y + v->video_height);     // Top-left
+    // Pre-calculate vertex positions using display dimensions
+    v->vertices[0] = (float)v->video_x;                            v->vertices[1] = (float)v->video_y;                             // Bottom-left
+    v->vertices[2] = (float)(v->video_x + v->display_width);       v->vertices[3] = (float)v->video_y;                             // Bottom-right
+    v->vertices[4] = (float)(v->video_x + v->display_width);       v->vertices[5] = (float)(v->video_y + v->display_height);       // Top-right
+    v->vertices[6] = (float)v->video_x;                            v->vertices[7] = (float)(v->video_y + v->display_height);       // Top-left
     
     // Initialize OpenGL state once
     glEnable(GL_TEXTURE_2D);
@@ -121,8 +130,9 @@ video_t *video_create(int width, int height) {
     // Use nearest filtering for better performance than linear
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    // Avoid edge bleeding on NPOT/POT textures
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 #endif
     
     // Set up viewport and projection matrix
@@ -152,8 +162,9 @@ video_t *video_create(int width, int height) {
     glClear(GL_COLOR_BUFFER_BIT);
     SDL_GL_SwapBuffers();
     
-    printf("OpenGL optimized: %dx%d window, video: %dx%d at (%d,%d)\n", 
-           v->window_width, v->window_height, v->video_width, v->video_height, v->video_x, v->video_y);
+    printf("OpenGL optimized: %dx%d window, video: %dx%d display: %dx%d at (%d,%d)\n", 
+           v->window_width, v->window_height, v->video_width, v->video_height, 
+           v->display_width, v->display_height, v->video_x, v->video_y);
     
     return v;
 }

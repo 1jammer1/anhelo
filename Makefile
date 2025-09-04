@@ -3,9 +3,21 @@ CC := gcc
 # Choose backend at compile time: BACKEND=sdl1 (default) or BACKEND=opengl
 BACKEND ?= opengl
 
+# Option to disable FFmpeg entirely (requires HLS streams with custom decoders)
+NO_FFMPEG ?= 1
+
 # Optimized compiler flags for maximum performance
 CFLAGS := -O2 -march=native -mtune=native -flto -ffast-math -funroll-loops -finline-functions
-CFLAGS += -Wall -Wextra -Iinclude -g $(shell pkg-config --cflags libavformat libavcodec libswscale libavutil sdl libcurl)
+CFLAGS += -Wall -Wextra -Iinclude -g
+
+# Conditionally include FFmpeg libraries
+ifeq ($(NO_FFMPEG),0)
+    CFLAGS += $(shell pkg-config --cflags libavformat libavcodec libswscale libavutil sdl libcurl)
+    LIBS := $(shell pkg-config --libs libavformat libavcodec libswscale libavutil sdl libcurl)
+else
+    CFLAGS += $(shell pkg-config --cflags sdl libcurl) -DNO_FFMPEG
+    LIBS := $(shell pkg-config --libs sdl libcurl)
+endif
 
 # Set debug or release mode
 DEBUG ?= 0
@@ -17,26 +29,39 @@ else
     LDFLAGS := -flto -O3  # Link-time optimization
 endif
 
-LIBS := $(shell pkg-config --libs libavformat libavcodec libswscale libavutil sdl libcurl)
+# When NO_FFMPEG is enabled, automatically enable custom decoders
+ifeq ($(NO_FFMPEG),1)
+    USE_SIMPLE_H264 := 1
+    USE_MPEG4 := 1
+endif
 
 ifeq ($(BACKEND),opengl)
-	BACK_SRC := src/gopengl.c
+	BACK_SRC := src/gapis/gopengl.c
 	EXTRA_LIBS := -lGL
 	CFLAGS += -DBACKEND_OPENGL
 else
-	BACK_SRC := src/gsdl1.c
+	BACK_SRC := src/gapis/gsdl1.c
 	EXTRA_LIBS :=
 endif
 
-SRCS := src/main.c src/twitch.c src/memory_pool.c src/debug_utils.c $(BACK_SRC)
+SRCS := src/main.c src/resolver/twitch.c src/memory_pool.c src/dmux/hls/hls_demuxer.c src/dmux/hls/playlist_parser.c $(BACK_SRC)
 
-# Optional: include the h264bsd decoder sources when requested
-USE_H264BSD ?= 0
-ifeq ($(USE_H264BSD),1)
-    H264_SRCS := $(wildcard src/h264/*.c)
-    SRCS += $(H264_SRCS)
+# Optional: include the simple H.264 decoder sources when requested
+USE_SIMPLE_H264 ?= 0
+ifeq ($(USE_SIMPLE_H264),1)
+    SIMPLE_H264_SRCS := $(wildcard src/codecs/simple_h264/*.c)
+    SRCS += $(SIMPLE_H264_SRCS)
     # Make the macro available to sources (including main.c)
-    CFLAGS += -DUSE_H264BSD
+    CFLAGS += -DUSE_SIMPLE_H264
+endif
+
+# Optional: include the MPEG-4 decoder sources when requested
+USE_MPEG4 ?= 0
+ifeq ($(USE_MPEG4),1)
+    MPEG4_SRCS := $(wildcard src/codecs/mpeg4/*.c)
+    SRCS += $(MPEG4_SRCS)
+    # Make the macro available to sources (including main.c)
+    CFLAGS += -DUSE_MPEG4
 endif
 
 OBJS := $(SRCS:.c=.o)
@@ -89,10 +114,9 @@ $(TARGET): bin $(OBJS)
 src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-# Explicit rule for h264 objects (also matched by the generic rule above,
-# but kept for clarity and future per-dir flags if needed)
-src/h264/%.o: src/h264/%.c
+# Explicit rule for simple h264 objects
+src/codecs/simple_h264/%.o: src/codecs/simple_h264/%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -rf bin src/*.o
+	rm -rf bin src/**/*.o src/*.o

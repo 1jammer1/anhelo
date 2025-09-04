@@ -20,6 +20,9 @@ typedef struct {
     void *rgb_buffers[FRAME_POOL_SIZE];
     int available[FRAME_POOL_SIZE];
     int pool_size;
+#ifndef NO_FFMPEG
+    size_t rgb_sizes[FRAME_POOL_SIZE]; // RGB buffer sizes (FFmpeg mode only)
+#endif
 } frame_pool_t;
 
 // Memory pool functions

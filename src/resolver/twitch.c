@@ -5,7 +5,7 @@
 #include <limits.h>
 #include <curl/curl.h>
 
-#include "../include/twitch.h"
+#include "../../include/twitch.h"
 
 #include <unistd.h>
 
